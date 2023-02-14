@@ -1,6 +1,7 @@
 //#![warn(missing_docs)]
 
 use std::{
+    ffi::{OsStr, OsString},
     fmt::Display,
     path::{Path, PathBuf},
     process::Command,
@@ -9,18 +10,20 @@ use std::{
 #[derive(Clone, Debug)]
 pub struct Instance {
     r#as: Option<PathBuf>,
-    file: Option<PathBuf>,
+    file: PathBuf,
     format: Option<OutputFormat>,
     output: Option<PathBuf>,
+    args: Vec<OsString>,
 }
 
 impl Instance {
-    pub fn new() -> Instance {
+    pub fn new<P: AsRef<Path>>(file: P) -> Instance {
         Instance {
             r#as: None,
-            file: None,
+            file: file.as_ref().to_path_buf(),
             format: None,
             output: None,
+            args: Vec::new(),
         }
     }
 
@@ -29,11 +32,19 @@ impl Instance {
     }
 
     pub fn set_file<P: AsRef<Path>>(&mut self, file: P) {
-        self.file = Some(file.as_ref().to_path_buf());
+        self.file = file.as_ref().to_path_buf();
     }
 
     pub fn set_format(&mut self, format: OutputFormat) {
         self.format = Some(format);
+    }
+
+    pub fn arg<S>(&mut self, arg: S) -> &mut Instance
+    where
+        S: AsRef<OsStr>,
+    {
+        self.args.push(arg.as_ref().to_os_string());
+        self
     }
 
     pub fn compile(&self) -> Result<PathBuf, String> {
@@ -44,12 +55,18 @@ impl Instance {
             cmd.arg("-f").arg(format.to_string());
         }
 
-        if let Some(path) = self.output {
-            cmd.arg("-o").arg(&path);
-            path
+        let output_path = if let Some(path) = self.output.as_ref() {
+            cmd.arg("-o").arg(path);
+            path.clone()
         } else {
-            Instance::convert_path(self.output)
+            println!("{}", self.file.display());
+            Instance::convert_path(
+                self.format.as_ref().unwrap_or(&OutputFormat::Binary),
+                &self.file,
+            )
         };
+
+        cmd.arg(&self.file);
 
         println!("Running: {:?}", cmd);
 
@@ -66,18 +83,18 @@ impl Instance {
             ));
         }
 
-        Ok()
+        Ok(output_path)
     }
 
-    fn convert_path<P: AsRef<Path>>(format: &OutputFormat, path: P) -> Option<PathBuf> {
+    fn convert_path<P: AsRef<Path>>(format: &OutputFormat, path: P) -> PathBuf {
         let path = path.as_ref();
         match format {
-            OutputFormat::Binary => Some(Path::new(path.file_stem()?).to_path_buf()),
-            OutputFormat::Ith => Some(path.with_extension("ith")),
-            OutputFormat::SRec => Some(path.with_extension("srec")),
-            OutputFormat::Dbg => Some(path.with_extension("dbg")),
+            OutputFormat::Binary => path.with_extension(""),
+            OutputFormat::Ith => path.with_extension("ith"),
+            OutputFormat::SRec => path.with_extension("srec"),
+            OutputFormat::Dbg => path.with_extension("dbg"),
             OutputFormat::Obj | OutputFormat::Win32 | OutputFormat::Win64 => {
-                Some(path.with_extension("obj"))
+                path.with_extension("obj")
             }
             OutputFormat::Coff
             | OutputFormat::Macho32
@@ -87,8 +104,7 @@ impl Instance {
             | OutputFormat::Elfx32
             | OutputFormat::Aout
             | OutputFormat::Aoutb
-            | OutputFormat::As86 => Some(path.with_extension("o")),
-            OutputFormat::Unlisted(_) => None,
+            | OutputFormat::As86 => path.with_extension("o"),
         }
     }
 
@@ -117,7 +133,7 @@ impl Instance {
     }
 
     fn is_nasm(&self, path: &Path) -> Result<(), String> {
-        let child = Command::new(path)
+        let output = Command::new(path)
             .arg("-v")
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -125,15 +141,14 @@ impl Instance {
             .wait_with_output()
             .map_err(|err| err.to_string())?;
 
-        //let output = String::from_utf8_lossy(&child.stdout);
+        if !output.status.success() {
+            return Err(format!(
+                "nasm returned with error code {}",
+                output.status.code().unwrap_or(0)
+            ));
+        }
 
         Ok(())
-    }
-}
-
-impl Default for Instance {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -155,7 +170,6 @@ pub enum OutputFormat {
     Aoutb,
     As86,
     Dbg,
-    Unlisted(String),
 }
 
 impl Display for OutputFormat {
@@ -177,7 +191,6 @@ impl Display for OutputFormat {
             OutputFormat::Aoutb => write!(f, "aoutb"),
             OutputFormat::As86 => write!(f, "as86"),
             OutputFormat::Dbg => write!(f, "dbg"),
-            OutputFormat::Unlisted(str) => write!(f, "{}", str),
         }
     }
 }
