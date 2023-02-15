@@ -39,6 +39,10 @@ impl Instance {
         self.format = Some(format);
     }
 
+    pub fn set_output<P: AsRef<Path>>(&mut self, output: P) {
+        self.output = Some(output.as_ref().to_path_buf())
+    }
+
     pub fn arg<S>(&mut self, arg: S) -> &mut Instance
     where
         S: AsRef<OsStr>,
