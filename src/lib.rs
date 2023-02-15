@@ -70,7 +70,9 @@ impl Instance {
             )
         };
 
-        std::fs::create_dir_all(&output_path).map_err(|err| err.to_string())?;
+        if let Some(dir_path) = output_path.parent() {
+            std::fs::create_dir_all(dir_path).map_err(|err| err.to_string())?;
+        }
 
         cmd.arg(&self.file);
 
