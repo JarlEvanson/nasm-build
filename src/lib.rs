@@ -70,6 +70,8 @@ impl Instance {
             )
         };
 
+        std::fs::create_dir_all(&output_path).map_err(|err| err.to_string())?;
+
         cmd.arg(&self.file);
 
         println!("Running: {:?}", cmd);
